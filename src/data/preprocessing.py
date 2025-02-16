@@ -184,7 +184,8 @@ class VideoPreprocessor:
             if not video_path.exists():
                 return {
                     'success': False,
-                    'error': f"Video file not found: {video_path}"
+                    'error': f"Video file not found: {video_path}",
+                    'video_id': video_info['video_id']
                 }
             
             # Extract frames
@@ -193,7 +194,8 @@ class VideoPreprocessor:
             if not frames:
                 return {
                     'success': False,
-                    'error': "No frames extracted from video"
+                    'error': "No frames extracted from video",
+                    'video_id': video_info['video_id']
                 }
             
             # Process frames
@@ -222,18 +224,25 @@ class VideoPreprocessor:
                 )
                 frame_paths.append(str(frame_path))
             
+            # Include all relevant video info in result
             return {
                 'success': True,
+                'video_id': video_info['video_id'],
+                'gloss': video_info['gloss'],
                 'frame_paths': frame_paths,
-                'bbox': bbox or [0, 0, 1, 1],  # Default to full frame
+                'bbox': bbox or video_info.get('bbox', [0, 0, 1, 1]),  # Use provided bbox or default
                 'fps': fps,
-                'num_frames': len(frames)
+                'num_frames': len(frames),
+                'split': video_info.get('split', 'train'),  # Preserve split information
+                'signer_id': video_info.get('signer_id'),  # Preserve signer information
+                'instance_id': video_info.get('instance_id')  # Preserve instance information
             }
             
         except Exception as e:
             return {
                 'success': False,
-                'error': str(e)
+                'error': str(e),
+                'video_id': video_info.get('video_id', 'unknown')
             }
     
     def process_batch(
