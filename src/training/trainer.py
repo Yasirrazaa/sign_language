@@ -72,15 +72,15 @@ class Trainer:
         )
         self.logger = logging.getLogger(__name__)
         
-        # Initialize callbacks
-        self.callbacks = self._setup_callbacks()
-        
         # Setup checkpoint directory
         self.checkpoint_dir = (
             config.checkpoint_dir or
             get_checkpoint_dir()
         )
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize callbacks
+        self.callbacks = self._setup_callbacks()
         
         # Initialize wandb if requested
         if config.use_wandb:
