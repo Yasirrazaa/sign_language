@@ -173,5 +173,4 @@ class VideoTransformer(nn.Module):
         
         # Get predictions
         class_pred = self.classifier(final_state)
-        
-        return class_pred
+        probabilities = torch.softmax(class_pred, dim=1)
