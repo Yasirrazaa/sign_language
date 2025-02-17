@@ -301,15 +301,41 @@ class Trainer:
         self.model.eval()
         epoch_metrics = []
         
+        if len(val_loader.dataset) == 0:
+            self.logger.warning("No validation data available!")
+            # Return empty metrics with 0 values
+            return {
+                'val_loss': 0.0,
+                'val_accuracy': 0.0,
+                'val_iou': 0.0,
+                'val_class_loss': 0.0,
+                'val_bbox_loss': 0.0,
+                'val_mean_precision': 0.0,
+                'val_mean_recall': 0.0,
+                'val_mean_f1': 0.0
+            }
+        
         for batch in tqdm(val_loader, desc='Validating'):
             metrics = self.validate_step(batch)
             epoch_metrics.append(metrics)
         
+        if not epoch_metrics:
+            self.logger.warning("No validation batches completed!")
+            return {
+                'val_loss': float('inf'),
+                'val_accuracy': 0.0,
+                'val_iou': 0.0,
+                'val_class_loss': float('inf'),
+                'val_bbox_loss': float('inf'),
+                'val_mean_precision': 0.0,
+                'val_mean_recall': 0.0,
+                'val_mean_f1': 0.0
+            }
+        
         # Average metrics
-        avg_metrics = {
-            key: sum(m[key] for m in epoch_metrics) / len(epoch_metrics)
-            for key in epoch_metrics[0].keys()
-        }
+        avg_metrics = {}
+        for key in epoch_metrics[0].keys():
+            avg_metrics[key] = sum(m[key] for m in epoch_metrics) / len(epoch_metrics)
         
         return avg_metrics
     

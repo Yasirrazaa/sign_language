@@ -30,8 +30,8 @@ class SignLanguageCNNLSTM(nn.Module):
         super().__init__()
         self.config = config
         
-        # CNN backbone (ResNet-18)
-        resnet = models.resnet18(pretrained=True)
+        # CNN backbone (ResNet-50)
+        resnet = models.resnet50(pretrained=True)
         self.cnn = nn.Sequential(
             *list(resnet.children())[:-1]  # Remove final FC layer
         )
