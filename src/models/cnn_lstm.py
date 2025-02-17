@@ -121,4 +121,4 @@ class SignLanguageCNNLSTM(nn.Module):
         
         # Get predictions
         class_pred = self.classifier(lstm_output)
-        return torch.softmax(class_pred, dim=1) 
+        return class_pred
