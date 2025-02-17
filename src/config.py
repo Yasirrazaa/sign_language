@@ -11,8 +11,8 @@ CHECKPOINT_DIR = BASE_DIR / 'checkpoints'
 
 # Data configuration
 DATA_CONFIG = {
-    'frame_size': (224, 224),  # Input frame size (height, width)
-    'num_frames': 32,          # Increased number of frames per video for better temporal coverage
+    'frame_size': (224, 224),  # Balanced size for memory and detail
+    'num_frames': 64,          # Increased frames for better temporal coverage
     'fps': 25,                # Target frames per second
     'train_split': 0.7,       # Training data split
     'val_split': 0.15,        # Validation data split
@@ -24,7 +24,7 @@ DATA_CONFIG = {
     'contrast_range': (0.8, 1.2),  # Random contrast adjustment range
     'rotation_range': 15,     # Maximum rotation angle in degrees
     'zoom_range': 0.1,        # Maximum zoom range
-    'batch_size': 8          # Increased batch size for better gradient estimates
+    'batch_size': 16          # Balanced batch size
 }
 
 # MediaPipe hand detection configuration
@@ -51,25 +51,25 @@ TRAIN_CONFIG = {
 MODEL_CONFIG = {
     # CNN+LSTM model configuration
     'cnn_lstm': {
-        'hidden_size': 256,     # Increased LSTM hidden dimension
-        'num_layers': 3,        # Reduced number of layers to prevent overfitting
-        'dropout_rate': 0.5,    # Increased dropout for better regularization
-        'bidirectional': True,  # Using bidirectional LSTM for better context
-        'lstm_units': [256, 128],  # Increased units in LSTM layers
-        'dense_units': [256],   # Increased units in dense layers
-        'l2_reg': 1e-5         # L2 regularization factor
+        'hidden_size': 512,      # Increased for better capacity
+        'num_layers': 3,         # Keep current
+        'dropout_rate': 0.5,     # Strong regularization
+        'bidirectional': True,   # Using bidirectional LSTM
+        'lstm_units': [512, 256],  # Balanced unit sizes
+        'dense_units': [512],    # Increased dense layer
+        'l2_reg': 1e-5          # L2 regularization factor
     },
     
     # Transformer model configuration
     'transformer': {
-        'd_model': 128,        # Increased model dimension
-        'nhead': 8,            # Number of attention heads
-        'num_encoder_layers': 6,  # Reduced number of layers for efficiency
-        'dim_feedforward': 512,  # Increased feedforward dimension
-        'dropout_rate': 0.3,    # Increased dropout rate
-        'attention_dropout': 0.2,  # Increased attention dropout
+        'd_model': 256,         # Increased model dimension
+        'nhead': 8,             # Number of attention heads
+        'num_encoder_layers': 6, # Keep current
+        'dim_feedforward': 1024,  # Increased feedforward dimension
+        'dropout_rate': 0.3,     # Moderate dropout
+        'attention_dropout': 0.2, # Attention-specific dropout
         'max_seq_length': 1000,  # Maximum sequence length
-        'activation': 'gelu'    # Using GELU activation
+        'activation': 'gelu'     # Using GELU activation
     }
 }
 

@@ -111,7 +111,7 @@ class SignLanguageCNNLSTM(nn.Module):
             x: Input tensor [batch_size, num_frames, channels, height, width]
             
         Returns:
-            Class predictions
+            Class prediction logits
         """
         # Extract CNN features
         features = self.extract_features(x)
@@ -121,4 +121,4 @@ class SignLanguageCNNLSTM(nn.Module):
         
         # Get predictions
         class_pred = self.classifier(lstm_output)
-        return class_pred
+        return class_pred  # Return raw logits, no softmax
