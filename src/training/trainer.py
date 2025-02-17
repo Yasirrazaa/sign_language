@@ -23,8 +23,6 @@ class TrainerConfig:
     learning_rate: float = 1e-3
     weight_decay: float = 1e-4
     clip_grad_norm: float = 1.0
-    class_loss_weight: float = 1.0
-    bbox_loss_weight: float = 1.0
     use_wandb: bool = True
     checkpoint_dir: Optional[Path] = None
     device: Optional[torch.device] = None
@@ -61,9 +59,8 @@ class Trainer:
             weight_decay=config.weight_decay
         )
         
-        # Initialize loss functions
-        self.class_criterion = nn.CrossEntropyLoss()
-        self.bbox_criterion = nn.MSELoss()
+        # Initialize loss function
+        self.criterion = nn.CrossEntropyLoss()
         
         # Initialize logging
         logging.basicConfig(
@@ -83,12 +80,9 @@ class Trainer:
         self.history = {
             'train_loss': [], 'val_loss': [],
             'train_accuracy': [], 'val_accuracy': [],
-            'train_iou': [], 'val_iou': [],
-            'train_class_loss': [], 'val_class_loss': [],
-            'train_bbox_loss': [], 'val_bbox_loss': [],
-            'train_mean_precision': [], 'val_mean_precision': [],
-            'train_mean_recall': [], 'val_mean_recall': [],
-            'train_mean_f1': [], 'val_mean_f1': [],
+            'train_precision': [], 'val_precision': [],
+            'train_recall': [], 'val_recall': [],
+            'train_f1': [], 'val_f1': [],
             'learning_rate': []
         }
         
@@ -147,34 +141,26 @@ class Trainer:
     
     def train_step(
         self,
-        batch: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+        batch: Tuple[torch.Tensor, torch.Tensor]
     ) -> Dict[str, float]:
         """
         Single training step.
         
         Args:
-            batch: Tuple of (frames, (labels, bboxes))
+            batch: Tuple of (frames, labels)
             
         Returns:
             Dictionary of metrics
         """
-        frames, (labels, bboxes) = batch
+        frames, labels = batch
         frames = frames.to(self.device)
         labels = labels.to(self.device)
-        bboxes = bboxes.to(self.device)
         
         # Forward pass
-        class_pred, bbox_pred = self.model(frames)
+        predictions = self.model(frames)
         
-        # Calculate losses
-        class_loss = self.class_criterion(class_pred, labels)
-        bbox_loss = self.bbox_criterion(bbox_pred, bboxes)
-        
-        # Combined loss
-        loss = (
-            self.config.class_loss_weight * class_loss +
-            self.config.bbox_loss_weight * bbox_loss
-        )
+        # Calculate loss
+        loss = self.criterion(predictions, labels)
         
         # Backward pass
         self.optimizer.zero_grad()
@@ -191,16 +177,10 @@ class Trainer:
         
         # Calculate metrics
         metrics = calculate_metrics(
-            class_pred.detach(),
-            labels.detach(),
-            bbox_pred.detach(),
-            bboxes.detach()
+            predictions.detach(),
+            labels.detach()
         )
-        metrics.update({
-            'loss': loss.item(),
-            'class_loss': class_loss.item(),
-            'bbox_loss': bbox_loss.item()
-        })
+        metrics['loss'] = loss.item()
         
         # Prefix metrics with 'train_'
         train_metrics = {f'train_{k}': v for k, v in metrics.items()}
@@ -210,47 +190,30 @@ class Trainer:
     @torch.no_grad()
     def validate_step(
         self,
-        batch: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+        batch: Tuple[torch.Tensor, torch.Tensor]
     ) -> Dict[str, float]:
         """
         Single validation step.
         
         Args:
-            batch: Tuple of (frames, (labels, bboxes))
+            batch: Tuple of (frames, labels)
             
         Returns:
             Dictionary of metrics prefixed with 'val_'
         """
-        frames, (labels, bboxes) = batch
+        frames, labels = batch
         frames = frames.to(self.device)
         labels = labels.to(self.device)
-        bboxes = bboxes.to(self.device)
         
         # Forward pass
-        class_pred, bbox_pred = self.model(frames)
+        predictions = self.model(frames)
         
-        # Calculate losses
-        class_loss = self.class_criterion(class_pred, labels)
-        bbox_loss = self.bbox_criterion(bbox_pred, bboxes)
-        
-        # Combined loss
-        loss = (
-            self.config.class_loss_weight * class_loss +
-            self.config.bbox_loss_weight * bbox_loss
-        )
+        # Calculate loss
+        loss = self.criterion(predictions, labels)
         
         # Calculate metrics
-        metrics = calculate_metrics(
-            class_pred,
-            labels,
-            bbox_pred,
-            bboxes
-        )
-        metrics.update({
-            'loss': loss.item(),
-            'class_loss': class_loss.item(),
-            'bbox_loss': bbox_loss.item()
-        })
+        metrics = calculate_metrics(predictions, labels)
+        metrics['loss'] = loss.item()
         
         # Prefix metrics with 'val_'
         val_metrics = {f'val_{k}': v for k, v in metrics.items()}
@@ -307,12 +270,9 @@ class Trainer:
             return {
                 'val_loss': 0.0,
                 'val_accuracy': 0.0,
-                'val_iou': 0.0,
-                'val_class_loss': 0.0,
-                'val_bbox_loss': 0.0,
-                'val_mean_precision': 0.0,
-                'val_mean_recall': 0.0,
-                'val_mean_f1': 0.0
+                'val_precision': 0.0,
+                'val_recall': 0.0,
+                'val_f1': 0.0
             }
         
         for batch in tqdm(val_loader, desc='Validating'):
@@ -324,12 +284,9 @@ class Trainer:
             return {
                 'val_loss': float('inf'),
                 'val_accuracy': 0.0,
-                'val_iou': 0.0,
-                'val_class_loss': float('inf'),
-                'val_bbox_loss': float('inf'),
-                'val_mean_precision': 0.0,
-                'val_mean_recall': 0.0,
-                'val_mean_f1': 0.0
+                'val_precision': 0.0,
+                'val_recall': 0.0,
+                'val_f1': 0.0
             }
         
         # Average metrics
@@ -338,7 +295,7 @@ class Trainer:
             avg_metrics[key] = sum(m[key] for m in epoch_metrics) / len(epoch_metrics)
         
         return avg_metrics
-    
+
     def train(
         self,
         train_loader: DataLoader,
@@ -413,7 +370,7 @@ class Trainer:
         if self.config.use_wandb:
             wandb.log({
                 'epoch': epoch + 1,
-                **{f'train_{k}': v for k, v in train_metrics.items()},
+                **train_metrics,
                 **val_metrics
             })
     

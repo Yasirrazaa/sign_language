@@ -7,60 +7,23 @@ from typing import Dict, Tuple
 def calculate_accuracy(
     pred: torch.Tensor,
     target: torch.Tensor
-) -> Tuple[float, torch.Tensor]:
+) -> float:
     """
-    Calculate classification accuracy and predicted classes.
+    Calculate classification accuracy.
     
     Args:
         pred: Predicted class probabilities [batch_size, num_classes]
         target: Target class one-hot encodings [batch_size, num_classes]
         
     Returns:
-        Tuple of (accuracy, predicted_classes)
+        Accuracy score
     """
     pred_classes = torch.argmax(pred, dim=1)
     target_classes = torch.argmax(target, dim=1)
     correct = (pred_classes == target_classes).float()
     accuracy = correct.mean().item()
     
-    return accuracy, pred_classes
-
-def calculate_iou(
-    pred_boxes: torch.Tensor,
-    target_boxes: torch.Tensor
-) -> float:
-    """
-    Calculate Intersection over Union (IoU).
-    
-    Args:
-        pred_boxes: Predicted boxes [batch_size, 4] (x1, y1, x2, y2)
-        target_boxes: Target boxes [batch_size, 4] (x1, y1, x2, y2)
-        
-    Returns:
-        Mean IoU score
-    """
-    # Calculate intersection coordinates
-    x1 = torch.max(pred_boxes[:, 0], target_boxes[:, 0])
-    y1 = torch.max(pred_boxes[:, 1], target_boxes[:, 1])
-    x2 = torch.min(pred_boxes[:, 2], target_boxes[:, 2])
-    y2 = torch.min(pred_boxes[:, 3], target_boxes[:, 3])
-    
-    # Calculate areas
-    intersection = torch.clamp(x2 - x1, min=0) * torch.clamp(y2 - y1, min=0)
-    pred_area = (
-        (pred_boxes[:, 2] - pred_boxes[:, 0]) *
-        (pred_boxes[:, 3] - pred_boxes[:, 1])
-    )
-    target_area = (
-        (target_boxes[:, 2] - target_boxes[:, 0]) *
-        (target_boxes[:, 3] - target_boxes[:, 1])
-    )
-    union = pred_area + target_area - intersection
-    
-    # Calculate IoU
-    iou = intersection / (union + 1e-6)  # Add small epsilon to avoid division by zero
-    
-    return iou.mean().item()
+    return accuracy
 
 def calculate_confusion_matrix(
     pred: torch.Tensor,
@@ -133,43 +96,41 @@ def calculate_f1_score(
     return 2 * (precision * recall) / (precision + recall + 1e-6)
 
 def calculate_metrics(
-    class_pred: torch.Tensor,
-    class_target: torch.Tensor,
-    bbox_pred: torch.Tensor,
-    bbox_target: torch.Tensor
+    pred: torch.Tensor,
+    target: torch.Tensor
 ) -> Dict[str, float]:
     """
     Calculate all metrics for predictions.
     
     Args:
-        class_pred: Predicted class probabilities [batch_size, num_classes]
-        class_target: Target class one-hot encodings [batch_size, num_classes]
-        bbox_pred: Predicted boxes [batch_size, 4]
-        bbox_target: Target boxes [batch_size, 4]
+        pred: Predicted class probabilities [batch_size, num_classes]
+        target: Target class one-hot encodings [batch_size, num_classes]
         
     Returns:
         Dictionary of metrics
     """
-    # Classification metrics
-    accuracy, pred_classes = calculate_accuracy(class_pred, class_target)
-    confusion_mat = calculate_confusion_matrix(
-        class_pred,
-        class_target,
-        class_pred.size(1)
-    )
-    precision, recall = calculate_precision_recall(confusion_mat)
-    f1_scores = calculate_f1_score(precision, recall)
+    # Calculate accuracy
+    accuracy = calculate_accuracy(pred, target)
     
-    # Localization metrics
-    iou_score = calculate_iou(bbox_pred, bbox_target)
+    # Calculate confusion matrix
+    confusion_mat = calculate_confusion_matrix(
+        pred,
+        target,
+        pred.size(1)
+    )
+    
+    # Calculate precision and recall
+    precision, recall = calculate_precision_recall(confusion_mat)
+    
+    # Calculate F1 score
+    f1_scores = calculate_f1_score(precision, recall)
     
     # Aggregate metrics
     metrics = {
         'accuracy': accuracy,
-        'iou': iou_score,
-        'mean_precision': precision.mean().item(),
-        'mean_recall': recall.mean().item(),
-        'mean_f1': f1_scores.mean().item()
+        'precision': precision.mean().item(),
+        'recall': recall.mean().item(),
+        'f1': f1_scores.mean().item()
     }
     
     return metrics

@@ -5,7 +5,6 @@ import torch.nn as nn
 import torchvision.models as models
 import math
 from dataclasses import dataclass
-from typing import Tuple
 
 from ..config import MODEL_CONFIG
 
@@ -17,7 +16,7 @@ class TransformerConfig:
     nhead: int = MODEL_CONFIG['transformer']['nhead']
     num_encoder_layers: int = MODEL_CONFIG['transformer']['num_encoder_layers']
     dim_feedforward: int = MODEL_CONFIG['transformer']['dim_feedforward']
-    dropout_rate: float = MODEL_CONFIG['transformer']['dropout_rate']  # Updated to use dropout_rate
+    dropout_rate: float = MODEL_CONFIG['transformer']['dropout_rate']
     attention_dropout: float = MODEL_CONFIG['transformer']['attention_dropout']
     max_seq_length: int = MODEL_CONFIG['transformer']['max_seq_length']
     activation: str = MODEL_CONFIG['transformer']['activation']
@@ -49,15 +48,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Add positional encoding to input.
-        
-        Args:
-            x: Input tensor [batch_size, seq_len, d_model]
-            
-        Returns:
-            Tensor with positional encoding added
-        """
+        """Add positional encoding to input."""
         return x + self.pe[:, :x.size(1)]
 
 class VideoTransformer(nn.Module):
@@ -99,7 +90,7 @@ class VideoTransformer(nn.Module):
             d_model=config.d_model,
             nhead=config.nhead,
             dim_feedforward=config.dim_feedforward,
-            dropout=config.dropout_rate,  # Updated to use dropout_rate
+            dropout=config.dropout_rate,
             activation=config.activation
         )
         self.transformer_encoder = nn.TransformerEncoder(
@@ -111,17 +102,8 @@ class VideoTransformer(nn.Module):
         self.classifier = nn.Sequential(
             nn.Linear(config.d_model, config.d_model // 2),
             nn.ReLU(),
-            nn.Dropout(p=config.dropout_rate),  # Updated to use dropout_rate
+            nn.Dropout(p=config.dropout_rate),
             nn.Linear(config.d_model // 2, config.num_classes)
-        )
-        
-        # Bounding box head
-        self.bbox_head = nn.Sequential(
-            nn.Linear(config.d_model, config.d_model // 2),
-            nn.ReLU(),
-            nn.Dropout(p=config.dropout_rate),  # Updated to use dropout_rate
-            nn.Linear(config.d_model // 2, 4),
-            nn.Sigmoid()  # Normalize to [0, 1]
         )
     
     def extract_features(self, x: torch.Tensor) -> torch.Tensor:
@@ -147,27 +129,10 @@ class VideoTransformer(nn.Module):
         features = self.feature_projection(features)
         
         return features
-    
-    def generate_square_subsequent_mask(
-        self,
-        sz: int,
-        device: torch.device
-    ) -> torch.Tensor:
-        """
-        Generate attention mask for autoregressive training.
-        
-        Args:
-            sz: Sequence length
-            device: Target device
-            
-        Returns:
-            Attention mask tensor
-        """
-        mask = (
-            torch.triu(
-                torch.ones(sz, sz, device=device)
-            ) == 1
-        ).transpose(0, 1)
+
+    def generate_square_subsequent_mask(self, sz: int, device: torch.device) -> torch.Tensor:
+        """Generate attention mask for autoregressive training."""
+        mask = (torch.triu(torch.ones(sz, sz, device=device)) == 1).transpose(0, 1)
         mask = (
             mask.float()
             .masked_fill(mask == 0, float('-inf'))
@@ -175,10 +140,7 @@ class VideoTransformer(nn.Module):
         )
         return mask
     
-    def forward(
-        self,
-        x: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass.
         
@@ -186,7 +148,7 @@ class VideoTransformer(nn.Module):
             x: Input tensor [batch_size, num_frames, channels, height, width]
             
         Returns:
-            Tuple of (class_predictions, bbox_predictions)
+            Class predictions
         """
         # Extract features
         features = self.extract_features(x)
@@ -211,6 +173,5 @@ class VideoTransformer(nn.Module):
         
         # Get predictions
         class_pred = self.classifier(final_state)
-        bbox_pred = self.bbox_head(final_state)
         
-        return class_pred, bbox_pred
+        return class_pred

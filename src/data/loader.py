@@ -58,13 +58,20 @@ class VideoDataset(Dataset):
         self.num_classes = len(class_mapping)
         
         # Default augmentation if no transform provided
-        if self.transform is None:
+        if self.transform is None and training:
             self.transform = transforms.Compose([
                 transforms.ColorJitter(
                     brightness=DATA_CONFIG['brightness_delta'],
                     contrast=DATA_CONFIG['contrast_range'][0]
                 ),
                 transforms.RandomHorizontalFlip(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225]
+                )
+            ])
+        elif self.transform is None:
+            self.transform = transforms.Compose([
                 transforms.Normalize(
                     mean=[0.485, 0.456, 0.406],
                     std=[0.229, 0.224, 0.225]
@@ -77,18 +84,16 @@ class VideoDataset(Dataset):
     
     def load_video(
         self,
-        frame_paths: List[str],
-        bbox: List[float]
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        frame_paths: List[str]
+    ) -> torch.Tensor:
         """
         Load and preprocess video frames.
         
         Args:
             frame_paths: List of frame file paths
-            bbox: Bounding box coordinates [x1, y1, x2, y2]
             
         Returns:
-            Tuple of (frames tensor, bbox tensor)
+            Frames tensor
         """
         # Calculate frame indices
         num_frames = len(frame_paths)
@@ -110,19 +115,14 @@ class VideoDataset(Dataset):
             frame = cv2.resize(frame, DATA_CONFIG['frame_size'])
             frames.append(frame)
         
-        # Convert to tensors
+        # Convert to tensor
         frames = torch.FloatTensor(np.array(frames))
         frames = frames / 255.0  # Normalize to [0, 1]
         frames = frames.permute(0, 3, 1, 2)  # [T, H, W, C] -> [T, C, H, W]
         
-        bbox = torch.FloatTensor(bbox)
-        
-        return frames, bbox
+        return frames
     
-    def __getitem__(
-        self,
-        idx: int
-    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Get a single sample.
         
@@ -130,27 +130,24 @@ class VideoDataset(Dataset):
             idx: Sample index
             
         Returns:
-            Tuple of (frames, (label, bbox))
+            Tuple of (frames, label)
         """
         video_info = self.video_data[idx]
         
-        # Load frames and bbox
-        frames, bbox = self.load_video(
-            video_info['frame_paths'],
-            video_info['bbox']
-        )
+        # Load frames
+        frames = self.load_video(video_info['frame_paths'])
         
         # Apply transforms
-        if self.transform and self.training:
+        if self.transform:
             frames = torch.stack([
                 self.transform(frame) for frame in frames
             ])
         
-        # Create label
+        # Create one-hot encoded label
         label = torch.zeros(self.num_classes)
         label[self.class_mapping[video_info['gloss']]] = 1
         
-        return frames, (label, bbox)
+        return frames, label
 
 def create_dataloaders(
     video_data: List[Dict],

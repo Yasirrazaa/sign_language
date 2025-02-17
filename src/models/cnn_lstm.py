@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 from dataclasses import dataclass
-from typing import Tuple
 
 from ..config import MODEL_CONFIG
 
@@ -14,7 +13,7 @@ class CNNLSTMConfig:
     num_classes: int
     hidden_size: int = MODEL_CONFIG['cnn_lstm']['hidden_size']
     num_layers: int = MODEL_CONFIG['cnn_lstm']['num_layers']
-    dropout_rate: float = MODEL_CONFIG['cnn_lstm']['dropout_rate']  # Updated to use dropout_rate
+    dropout_rate: float = MODEL_CONFIG['cnn_lstm']['dropout_rate']
     bidirectional: bool = MODEL_CONFIG['cnn_lstm']['bidirectional']
 
 class SignLanguageCNNLSTM(nn.Module):
@@ -44,7 +43,7 @@ class SignLanguageCNNLSTM(nn.Module):
             input_size=self.feature_size,
             hidden_size=config.hidden_size,
             num_layers=config.num_layers,
-            dropout=config.dropout_rate if config.num_layers > 1 else 0,  # Updated to use dropout_rate
+            dropout=config.dropout_rate if config.num_layers > 1 else 0,
             bidirectional=config.bidirectional,
             batch_first=True
         )
@@ -56,17 +55,8 @@ class SignLanguageCNNLSTM(nn.Module):
         self.classifier = nn.Sequential(
             nn.Linear(lstm_output_size, lstm_output_size // 2),
             nn.ReLU(),
-            nn.Dropout(p=config.dropout_rate),  # Updated to use dropout_rate
+            nn.Dropout(p=config.dropout_rate),
             nn.Linear(lstm_output_size // 2, config.num_classes)
-        )
-        
-        # Bounding box regression head
-        self.bbox_regressor = nn.Sequential(
-            nn.Linear(lstm_output_size, lstm_output_size // 2),
-            nn.ReLU(),
-            nn.Dropout(p=config.dropout_rate),  # Updated to use dropout_rate
-            nn.Linear(lstm_output_size // 2, 4),  # [x1, y1, x2, y2]
-            nn.Sigmoid()  # Normalize to [0, 1]
         )
     
     def extract_features(self, x: torch.Tensor) -> torch.Tensor:
@@ -113,10 +103,7 @@ class SignLanguageCNNLSTM(nn.Module):
         
         return hidden
     
-    def forward(
-        self,
-        x: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass.
         
@@ -124,7 +111,7 @@ class SignLanguageCNNLSTM(nn.Module):
             x: Input tensor [batch_size, num_frames, channels, height, width]
             
         Returns:
-            Tuple of (class_predictions, bbox_predictions)
+            Class predictions
         """
         # Extract CNN features
         features = self.extract_features(x)
@@ -134,6 +121,5 @@ class SignLanguageCNNLSTM(nn.Module):
         
         # Get predictions
         class_pred = self.classifier(lstm_output)
-        bbox_pred = self.bbox_regressor(lstm_output)
         
-        return class_pred, bbox_pred
+        return class_pred

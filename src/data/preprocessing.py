@@ -143,10 +143,7 @@ class VideoPreprocessor:
         
         return None
     
-    def _preprocess_frame(
-        self,
-        frame: np.ndarray
-    ) -> np.ndarray:
+    def _preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         """
         Preprocess single frame.
         
@@ -159,8 +156,14 @@ class VideoPreprocessor:
         # Convert to tensor
         frame_tensor = self.transform(frame)
         
-        # Convert back to numpy for saving
+        # Denormalize
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+        frame_tensor = frame_tensor * std + mean
+        
+        # Convert back to numpy for saving (scale to 0-255 range)
         frame_np = frame_tensor.permute(1, 2, 0).numpy()
+        frame_np = (frame_np * 255).clip(0, 255).astype(np.uint8)
         
         return frame_np
     
