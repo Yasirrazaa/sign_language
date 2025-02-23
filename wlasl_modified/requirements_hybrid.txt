@@ -1,0 +1,78 @@
+# Core dependencies
+torch>=1.9.0
+torchvision>=0.10.0
+numpy>=1.19.0
+einops>=0.4.0  # For efficient tensor operations
+
+# Video processing
+opencv-python>=4.5.0
+pytorchvideo>=0.1.5  # For video models
+moviepy>=1.0.3  # For video frame extraction
+
+# Machine Learning
+transformers>=4.15.0  # For transformer components
+timm>=0.4.12  # For vision transformer components
+scikit-learn>=0.24.0
+
+# Efficient data loading
+nvidia-dali-cuda110>=1.12.0  # For efficient GPU data loading
+webdataset>=0.1.103  # For efficient dataset handling
+
+# Memory optimization
+torch-memlab>=0.2.0  # For memory profiling
+psutil>=5.8.0  # For system memory monitoring
+
+# Logging and visualization
+wandb>=0.12.0
+tensorboard>=2.7.0
+matplotlib>=3.4.0
+seaborn>=0.11.0
+
+# Training utilities
+tqdm>=4.62.0
+PyYAML>=5.4.1
+omegaconf>=2.1.1  # For structured configs
+
+# Testing
+pytest>=6.2.5
+pytest-cov>=2.12.0
+memory-profiler>=0.58.0
+
+# Optional: Apex for mixed precision (if not using native PyTorch AMP)
+# apex>=0.1.0
+
+# Development
+black>=21.7b0
+isort>=5.9.3
+flake8>=3.9.0
+mypy>=0.910
+
+# Documentation
+sphinx>=4.2.0
+sphinx-rtd-theme>=1.0.0
+recommonmark>=0.7.1
+
+# Extra requirements for hybrid models
+timesformer-pytorch>=0.1.0  # For TimeSformer implementation
+pytorch-lightning>=1.5.0  # For structured training loops
+hydra-core>=1.1.0  # For configuration management
+rich>=10.12.0  # For beautiful CLI output
+
+# Dependencies with specific versions for compatibility
+numpy>=1.19.0,<1.22.0  # For compatibility with old CUDA versions
+pillow>=8.3.0,<9.0.0  # For image processing
+protobuf>=3.19.0,<4.0.0  # For TensorBoard compatibility
+
+# Version constraints
+typing-extensions>=3.10.0
+dataclasses>=0.8; python_version < '3.7'
+
+# Optional: For distributed training
+# horovod>=0.22.0
+# ray>=1.7.0
+
+# System requirements:
+# CUDA >= 11.0
+# cuDNN >= 8.0
+# gcc >= 7.3
+# Python >= 3.7

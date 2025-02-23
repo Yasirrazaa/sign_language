@@ -1,0 +1,103 @@
+# Configuration for memory-efficient sign language recognition
+
+model:
+  # Model architecture settings
+  num_classes: 100
+  in_channels: 3
+  base_channels: 64
+  num_frames: 16
+  
+  # Temporal modeling
+  tsm_segments: 8
+  tsm_fold_div: 8
+  tpp_levels: [1, 2, 3, 6]
+  
+  # Attention settings
+  attention_heads: 8
+  key_channels: 64
+  value_channels: 128
+  attention_chunk_size: 128
+  
+  # Memory optimization
+  use_gradient_checkpointing: true
+  optimize_attention_memory: true
+  enable_feature_caching: false
+  cache_size_limit_mb: 1024  # 1GB limit
+
+training:
+  # Basic training parameters
+  batch_size: 8  # Reduced batch size for memory efficiency
+  num_epochs: 100
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  
+  # Memory optimization
+  gradient_accumulation_steps: 4  # Effective batch size = batch_size * steps
+  mixed_precision: true
+  empty_cache_freq: 10
+  
+  # Gradient checkpointing
+  use_gradient_checkpointing: true
+  checkpoint_every_n_layers: 2
+  
+  # Memory monitoring
+  memory_warning_threshold: 0.9
+  memory_critical_threshold: 0.95
+  enable_memory_tracking: true
+  track_memory_every_n_steps: 50
+  
+  # Data loading
+  num_workers: 4
+  prefetch_factor: 2
+  pin_memory: true
+  persistent_workers: true
+  
+  # Learning rate scheduling
+  lr_scheduler: cosine
+  warmup_epochs: 5
+  min_lr: 0.000001
+  
+  # Early stopping
+  early_stopping_patience: 15
+  early_stopping_min_delta: 0.0001
+
+data:
+  # Frame processing
+  frame_size: [224, 224]
+  temporal_crop_size: 16
+  temporal_stride: 2
+  
+  # Augmentation
+  enable_augmentation: true
+  rotation_range: 15
+  scale_range: [0.8, 1.2]
+  horizontal_flip_prob: 0.5
+  temporal_mask_prob: 0.3
+  
+  # Memory optimization
+  chunk_size: 32
+  max_frames_in_memory: 256
+  enable_frame_caching: true
+  cache_size_limit_mb: 2048  # 2GB limit
+
+# Hardware settings
+hardware:
+  gpu_memory_limit: 0.9  # Use up to 90% of GPU memory
+  cpu_memory_limit: 0.8  # Use up to 80% of RAM
+  num_gpus: 1
+  use_distributed: false
+
+# Logging settings
+logging:
+  log_dir: logs
+  tensorboard: true
+  log_frequency: 50
+  save_frequency: 5
+  keep_n_checkpoints: 3
+
+# Visualization settings
+visualization:
+  enable_attention_maps: false  # Disable to save memory
+  save_sample_predictions: true
+  num_samples: 10
+  plot_learning_curves: true

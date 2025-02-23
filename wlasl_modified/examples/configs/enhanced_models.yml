@@ -1,0 +1,143 @@
+# Configuration for enhanced CNN+LSTM and 3D CNN models
+
+# Common settings
+common:
+  num_classes: 26
+  input_shape: [30, 128, 128, 3]  # [frames, height, width, channels]
+  cross_validation:
+    num_folds: 7
+    epochs_per_fold: 20
+    batch_size: 8
+
+# CNN+LSTM Configuration
+cnn_lstm:
+  architecture:
+    conv_filters: [64, 128, 256, 512]  # Progressive increase in filters
+    lstm_units: [256, 128]  # Decreasing LSTM units for memory efficiency
+    dropout_rate: 0.5
+    use_gradient_checkpointing: true
+  
+  memory_optimization:
+    chunk_size: 8  # Process frames in chunks
+    clear_features: true  # Clear intermediate features
+    cache_lstm_states: false
+  
+  training:
+    optimizer:
+      type: 'adam'
+      learning_rate: 0.001
+      weight_decay: 1e-4
+    
+    learning_rate_schedule:
+      type: 'reduce_on_plateau'
+      patience: 5
+      factor: 0.5
+      min_lr: 1e-6
+    
+    regularization:
+      l2_lambda: 1e-4
+      gradient_clip: 1.0
+
+# 3D CNN Configuration
+3d_cnn:
+  architecture:
+    base_filters: 32
+    layer_config:
+      - filters: 32
+        kernel_size: [3, 3, 3]
+        stride: [1, 1, 1]
+      - filters: 64
+        kernel_size: [3, 3, 3]
+        stride: [2, 1, 1]  # Temporal downsampling
+      - filters: 128
+        kernel_size: [3, 3, 3]
+        stride: [1, 2, 2]  # Spatial downsampling
+      - filters: 256
+        kernel_size: [3, 3, 3]
+        stride: [2, 2, 2]  # Both temporal and spatial
+  
+  memory_optimization:
+    use_gradient_checkpointing: true
+    clear_intermediate: true
+    efficient_pooling: true
+  
+  training:
+    optimizer:
+      type: 'adam'
+      learning_rate: 0.001
+      weight_decay: 1e-4
+    
+    learning_rate_schedule:
+      type: 'cosine'
+      warmup_epochs: 3
+      min_lr: 1e-6
+
+# Data Processing
+data:
+  preprocessing:
+    normalize: true
+    scale_range: [-1, 1]
+    temporal_jittering: true
+  
+  augmentation:
+    enabled: true
+    rotation_range: [-15, 15]
+    zoom_range: [0.9, 1.1]
+    horizontal_flip: true
+    temporal_crop: true
+  
+  memory_efficiency:
+    preload_batches: 2
+    cache_size_mb: 1024
+    clear_cache_frequency: 10
+
+# Training Pipeline
+training:
+  # Memory-efficient training settings
+  mixed_precision: true
+  gradient_accumulation_steps: 4
+  
+  # Validation
+  validation_frequency: 1
+  save_best_only: true
+  
+  # Early stopping
+  early_stopping:
+    enabled: true
+    patience: 10
+    min_delta: 0.001
+  
+  # Checkpointing
+  checkpointing:
+    save_frequency: 5
+    keep_best_n: 3
+    save_optimizer_state: false
+
+# Evaluation
+evaluation:
+  metrics:
+    - accuracy
+    - precision
+    - recall
+    - f1
+  
+  top_k_accuracy: [1, 3, 5]
+  confusion_matrix: true
+  
+  visualization:
+    enabled: true
+    confusion_matrix: true
+    learning_curves: true
+    sample_predictions: 10
+
+# Hardware Optimization
+hardware:
+  gpu_memory_fraction: 0.9
+  num_workers: 4
+  pin_memory: true
+  non_blocking: true
+  
+  cuda_optimization:
+    benchmark: false
+    deterministic: true
+    allow_tf32: false

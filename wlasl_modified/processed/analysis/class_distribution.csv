@@ -1,0 +1,7 @@
+class,total_videos,num_signers,train_videos,val_videos,test_videos
+drink,3,3,1,2,0
+computer,3,3,2,0,1
+before,3,3,3,0,0
+chair,3,3,2,0,1
+go,3,3,1,1,1
+book,1,1,1,0,0

@@ -1,0 +1,91 @@
+# Core dependencies
+torch>=1.9.0
+torchvision>=0.10.0
+numpy>=1.19.0
+pandas>=1.3.0
+
+# Video processing
+opencv-python>=4.5.0
+moviepy>=1.0.3
+
+# Visualization
+matplotlib>=3.4.0
+seaborn>=0.11.0
+
+# Data processing and analysis
+scikit-learn>=0.24.0
+scipy>=1.7.0
+
+# Progress bars and logging
+tqdm>=4.62.0
+wandb>=0.12.0  # For experiment tracking
+
+# Memory monitoring
+psutil>=5.8.0
+py-spy>=0.3.0  # For memory profiling
+memory_profiler>=0.58.0
+
+# Plotting and visualization extras
+plotly>=5.3.0
+bokeh>=2.4.0
+
+# Statistical analysis
+statsmodels>=0.13.0
+
+# Notebook support
+jupyter>=1.0.0
+ipython>=7.26.0
+ipywidgets>=7.6.0
+
+# Optimization
+numba>=0.54.0  # For performance optimization
+bottleneck>=1.3.0  # For optimized statistical functions
+
+# Image processing
+Pillow>=8.3.0
+albumentations>=1.0.0  # For image augmentation
+
+# File handling
+PyYAML>=5.4.1
+h5py>=3.3.0
+
+# Model analysis
+torchinfo>=1.5.0  # For model summary
+torchmetrics>=0.6.0  # For model metrics
+torch-optimizer>=0.3.0  # Additional optimizers
+
+# Development and testing
+pytest>=6.2.5
+pytest-cov>=2.12.0
+flake8>=3.9.0
+black>=21.7b0
+isort>=5.9.3
+
+# Profiling and benchmarking
+line_profiler>=3.3.0
+snakeviz>=2.1.0
+
+# GPU monitoring
+gputil>=1.4.0
+nvitop>=0.5.0  # For NVIDIA GPU monitoring
+
+# Optional: For distributed training
+# horovod>=0.22.0
+# ray>=1.7.0
+
+# Documentation
+sphinx>=4.2.0
+sphinx-rtd-theme>=1.0.0
+nbsphinx>=0.8.0
+
+# Versioning
+gitpython>=3.1.0
+
+# System dependencies:
+# CUDA >= 11.0 (for GPU support)
+# ffmpeg (for video processing)
+# libsm6 libxext6 (for OpenCV)
+
+# Version constraints for compatibility
+typing-extensions>=3.10.0
+protobuf>=3.19.0,<4.0.0  # For TensorBoard compatibility

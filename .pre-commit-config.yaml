@@ -1,0 +1,73 @@
+repos:
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v4.4.0
+  hooks:
+    - id: trailing-whitespace
+    - id: end-of-file-fixer
+    - id: check-yaml
+    - id: check-json
+    - id: check-added-large-files
+    - id: debug-statements
+    - id: requirements-txt-fixer
+
+- repo: https://github.com/psf/black
+  rev: 22.3.0
+  hooks:
+    - id: black
+      language_version: python3
+      args: [--line-length=88]
+
+- repo: https://github.com/pycqa/isort
+  rev: 5.12.0
+  hooks:
+    - id: isort
+      args: ["--profile", "black", "--filter-files"]
+
+- repo: https://github.com/pycqa/flake8
+  rev: 4.0.1
+  hooks:
+    - id: flake8
+      additional_dependencies: [
+        'flake8-docstrings==1.6.0',
+        'flake8-bugbear==22.1.11',
+        'flake8-comprehensions==3.8.0',
+      ]
+      args: [
+        "--max-line-length=88",
+        "--extend-ignore=E203",
+        "--docstring-convention=google"
+      ]
+
+- repo: https://github.com/pre-commit/mirrors-mypy
+  rev: v0.991
+  hooks:
+    - id: mypy
+      additional_dependencies: [types-all]
+      args: [--ignore-missing-imports]
+
+- repo: https://github.com/PyCQA/bandit
+  rev: 1.7.5
+  hooks:
+    - id: bandit
+      args: ["-c", "pyproject.toml"]
+      additional_dependencies: ["bandit[toml]"]
+
+- repo: local
+  hooks:
+    - id: pytest
+      name: pytest
+      entry: pytest
+      language: system
+      types: [python]
+      pass_filenames: false
+      always_run: true
+      stages: [push]
+      
+    - id: pytest-cov
+      name: pytest-cov
+      entry: pytest --cov=src --cov-report=term-missing
+      language: system
+      types: [python]
+      pass_filenames: false
+      always_run: true
+      stages: [push]

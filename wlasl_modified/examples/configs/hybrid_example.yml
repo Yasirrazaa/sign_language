@@ -1,0 +1,120 @@
+# Example configuration for hybrid transformer models
+
+# Common settings
+common:
+  seed: 42
+  num_classes: 26
+  input_shape: [30, 224, 224, 3]  # [frames, height, width, channels]
+
+# CNN-Transformer configuration
+cnn_transformer:
+  model:
+    embed_dim: 512
+    depth: 6
+    num_heads: 8
+    mlp_ratio: 4.0
+    dropout: 0.1
+    attention_dropout: 0.1
+    use_checkpoint: true
+    chunk_size: 128
+    
+  training:
+    batch_size: 8
+    gradient_accumulation_steps: 4
+    learning_rate: 1e-4
+    weight_decay: 1e-4
+    warmup_epochs: 5
+    num_epochs: 100
+    mixed_precision: true
+    cleanup_interval: 10
+
+# TimeSformer configuration
+timesformer:
+  model:
+    img_size: 224
+    patch_size: 16
+    embed_dim: 768
+    depth: 12
+    num_heads: 12
+    mlp_ratio: 4.0
+    dropout: 0.1
+    attention_dropout: 0.1
+    use_checkpoint: true
+    divided_space_time: true
+    
+  training:
+    batch_size: 4  # Smaller batch size due to higher memory usage
+    gradient_accumulation_steps: 8
+    learning_rate: 5e-5
+    weight_decay: 1e-4
+    warmup_epochs: 5
+    num_epochs: 100
+    mixed_precision: true
+    cleanup_interval: 5
+
+# Data processing
+data:
+  frame_processing:
+    temporal_stride: 2
+    frame_size: [224, 224]
+    normalize: true
+    scale_range: [-1, 1]
+  
+  augmentation:
+    enabled: true
+    rotation_range: [-15, 15]
+    scale_range: [0.8, 1.2]
+    translation_range: [-0.2, 0.2]
+    temporal_mask_prob: 0.3
+  
+  memory_optimization:
+    cache_size: 1000
+    prefetch_factor: 2
+    num_workers: 4
+    pin_memory: true
+
+# Training pipeline
+training:
+  optimizer:
+    type: 'adamw'
+    betas: [0.9, 0.999]
+    eps: 1e-8
+  
+  scheduler:
+    type: 'cosine'
+    warmup_epochs: 5
+    min_lr: 1e-6
+  
+  early_stopping:
+    patience: 10
+    min_delta: 0.001
+  
+  checkpointing:
+    save_frequency: 5
+    keep_best_n: 3
+    save_optimizer: false
+
+# Logging and monitoring
+logging:
+  wandb:
+    project: "wlasl-hybrid-transformers"
+    log_frequency: 50
+    log_gradients: false
+  
+  monitoring:
+    memory_warning_threshold: 0.9
+    memory_critical_threshold: 0.95
+
+# Hardware settings
+hardware:
+  gpu_memory_fraction: 0.95
+  cudnn_benchmark: true
+  deterministic: false
+  allow_tf32: false
+
+# Example usage:
+# python train_hybrid_models.py \
+#   --model cnn_transformer \
+#   --data-dir /path/to/data \
+#   --config examples/configs/hybrid_example.yml \
+#   --num-classes 26

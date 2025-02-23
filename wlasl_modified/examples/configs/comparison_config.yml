@@ -1,0 +1,165 @@
+# Configuration for model comparison experiments
+
+# Dataset settings
+data:
+  video_dir: "data/videos"
+  processed_dir: "processed"
+  frame_size: [224, 224]
+  num_frames: 30
+  temporal_stride: 2
+  
+  splits:
+    train: 0.7
+    val: 0.15
+    test: 0.15
+  
+  preprocessing:
+    target_fps: 25
+    normalize: true
+    scale_range: [-1, 1]
+    chunk_size: 32
+    cache_size_mb: 1024
+
+# Common training settings
+training:
+  num_epochs: 100
+  batch_size: 8
+  learning_rate: 1e-4
+  weight_decay: 1e-4
+  gradient_clip: 1.0
+  mixed_precision: true
+  
+  cross_validation:
+    num_folds: 7
+    shuffle: true
+    seed: 42
+  
+  optimizer:
+    type: 'adam'
+    betas: [0.9, 0.999]
+    eps: 1e-8
+  
+  scheduler:
+    type: 'cosine'
+    warmup_epochs: 5
+    min_lr: 1e-6
+
+# Model-specific settings
+models:
+  # Original I3D
+  i3d:
+    in_channels: 3
+    dropout_prob: 0.5
+    memory_efficient: false
+    pretrained: true
+    freeze_backbone: false
+  
+  # Memory-efficient I3D
+  efficient_i3d:
+    in_channels: 3
+    dropout_prob: 0.5
+    memory_efficient: true
+    gradient_checkpointing: true
+    chunk_size: 128
+  
+  # CNN-Transformer
+  cnn_transformer:
+    embed_dim: 512
+    depth: 6
+    num_heads: 8
+    mlp_ratio: 4.0
+    dropout: 0.1
+    attention_dropout: 0.1
+    use_checkpoint: true
+    chunk_size: 128
+  
+  # TimeSformer
+  timesformer:
+    patch_size: 16
+    embed_dim: 768
+    depth: 12
+    num_heads: 12
+    mlp_ratio: 4.0
+    dropout: 0.1
+    divided_space_time: true
+    use_checkpoint: true
+
+# Memory management
+memory:
+  gpu_memory_fraction: 0.9
+  cpu_memory_fraction: 0.8
+  cleanup_frequency: 10
+  warning_threshold: 0.9
+  critical_threshold: 0.95
+  
+  caching:
+    frame_cache_size: 1000
+    feature_cache_size: 512
+    clear_cache_frequency: 50
+
+# Evaluation metrics
+evaluation:
+  metrics:
+    - accuracy
+    - precision
+    - recall
+    - f1
+    - edit_distance
+  
+  # Memory profiling
+  profile_memory: true
+  profile_frequency: 100
+  save_memory_stats: true
+  
+  # Performance benchmarking
+  benchmark:
+    batch_sizes: [1, 2, 4, 8, 16]
+    profile_forward: true
+    profile_backward: true
+    warmup_iterations: 10
+    num_iterations: 100
+
+# Logging and visualization
+logging:
+  log_dir: "logs/comparison"
+  save_frequency: 5
+  
+  wandb:
+    project: "wlasl-model-comparison"
+    tags: ["comparison", "memory-efficient"]
+    log_frequency: 50
+  
+  visualization:
+    plot_metrics: true
+    plot_memory: true
+    plot_gradients: false
+    save_attention_maps: false
+    num_samples: 10
+
+# Hardware settings
+hardware:
+  num_workers: 4
+  pin_memory: true
+  non_blocking: true
+  cudnn_benchmark: true
+  deterministic: false
+  
+  distributed:
+    enabled: false
+    backend: "nccl"
+    num_nodes: 1
+    gpus_per_node: 1
+
+# Experiment metadata
+experiment:
+  name: "model_comparison"
+  description: "Comprehensive comparison of sign language recognition models"
+  tags: ["comparison", "memory-efficient", "cross-validation"]
+  version: "1.0"
+  
+  output:
+    save_checkpoints: true
+    save_best_only: true
+    keep_n_best: 3
+    save_predictions: true
+    export_onnx: false

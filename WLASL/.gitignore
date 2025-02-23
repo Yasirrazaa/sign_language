@@ -1,0 +1,36 @@
+# Data directories
+data/raw_videos/
+data/processed_videos/
+data/frames/
+data/features/
+
+# Model artifacts
+models/checkpoints/
+models/weights/
+*.pt
+*.pth
+
+# Analysis outputs
+analysis/plots/
+analysis/results/
+
+# Logs and temp files
+logs/
+*.log
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Environment
+.env
+.venv/
+env/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Other
+*.zip
+*.tar.gz
