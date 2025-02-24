@@ -6,21 +6,30 @@ import mediapipe as mp
 import numpy as np
 import cv2
 import json
+import gc
+import psutil
+import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Generator
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 
 from ..utils import get_video_dir, get_processed_dir
 from ..config import DATA_CONFIG
 
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 class VideoPreprocessor:
-    """Video preprocessing handler."""
+    """Memory-efficient video preprocessing handler."""
     
     def __init__(
         self,
         target_size: Tuple[int, int] = DATA_CONFIG['frame_size'],
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        max_frames: int = 300,  # Limit number of frames
+        sampling_rate: int = 2  # Sample every nth frame
     ):
         """
         Initialize preprocessor.
@@ -28,11 +37,15 @@ class VideoPreprocessor:
         Args:
             target_size: Target frame size (height, width)
             device: PyTorch device for processing
+            max_frames: Maximum number of frames to process per video
+            sampling_rate: Process every nth frame
         """
         self.target_size = target_size
         self.device = device or torch.device(
             'cuda' if torch.cuda.is_available() else 'cpu'
         )
+        self.max_frames = max_frames
+        self.sampling_rate = sampling_rate
         
         # Initialize MediaPipe Hands
         self.mp_hands = mp.solutions.hands.Hands(
@@ -51,41 +64,43 @@ class VideoPreprocessor:
                 std=[0.229, 0.224, 0.225]
             )
         ])
-    
-    def _extract_frames(
+
+    def _frame_generator(
         self,
         video_path: Union[str, Path]
-    ) -> Tuple[List[np.ndarray], float]:
+    ) -> Generator[Tuple[np.ndarray, float], None, None]:
         """
-        Extract frames from video file.
+        Generate frames from video file.
         
         Args:
             video_path: Path to video file
             
-        Returns:
-            Tuple of (list of frames, fps)
+        Yields:
+            Tuple of (frame, fps)
         """
         cap = cv2.VideoCapture(str(video_path))
-        frames = []
+        frame_count = 0
         
         try:
-            # Get video properties
             fps = cap.get(cv2.CAP_PROP_FPS)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
-            while True:
+            while frame_count < min(total_frames, self.max_frames):
                 ret, frame = cap.read()
                 if not ret:
                     break
                 
-                # Convert BGR to RGB
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frames.append(frame)
+                # Sample frames
+                if frame_count % self.sampling_rate == 0:
+                    # Convert BGR to RGB
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    yield frame, fps
+                
+                frame_count += 1
                 
         finally:
             cap.release()
-        
-        return frames, fps
-    
+
     def _detect_hands(
         self,
         frame: np.ndarray
@@ -142,7 +157,7 @@ class VideoPreprocessor:
             ]
         
         return None
-    
+
     def _preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         """
         Preprocess single frame.
@@ -161,18 +176,19 @@ class VideoPreprocessor:
         std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
         frame_tensor = frame_tensor * std + mean
         
-        # Convert back to numpy for saving (scale to 0-255 range)
+        # Convert back to numpy for saving
         frame_np = frame_tensor.permute(1, 2, 0).numpy()
         frame_np = (frame_np * 255).clip(0, 255).astype(np.uint8)
         
+        del frame_tensor
         return frame_np
-    
+
     def process_video(
         self,
         video_info: Dict
     ) -> Dict:
         """
-        Process single video.
+        Process single video with memory efficiency.
         
         Args:
             video_info: Video information dictionary
@@ -181,7 +197,6 @@ class VideoPreprocessor:
             Processing results dictionary
         """
         try:
-            # Get video path
             video_path = get_video_dir() / f"{video_info['video_id']}.mp4"
             
             if not video_path.exists():
@@ -191,74 +206,84 @@ class VideoPreprocessor:
                     'video_id': video_info['video_id']
                 }
             
-            # Extract frames
-            frames, fps = self._extract_frames(video_path)
+            # Setup output directory
+            output_dir = get_processed_dir() / 'frames' / video_info['video_id']
+            output_dir.mkdir(parents=True, exist_ok=True)
             
-            if not frames:
-                return {
-                    'success': False,
-                    'error': "No frames extracted from video",
-                    'video_id': video_info['video_id']
-                }
-            
-            # Process frames
-            processed_frames = []
+            frame_paths = []
+            frame_count = 0
             bbox = None
+            fps = None
             
-            for frame in frames:
+            # Process frames as they are generated
+            for frame, current_fps in self._frame_generator(video_path):
+                if fps is None:
+                    fps = current_fps
+                
                 # Detect hands if no bbox yet
                 if bbox is None:
                     bbox = self._detect_hands(frame)
                 
                 # Preprocess frame
                 processed = self._preprocess_frame(frame)
-                processed_frames.append(processed)
-            
-            # Save frames
-            frame_paths = []
-            output_dir = get_processed_dir() / 'frames' / video_info['video_id']
-            output_dir.mkdir(parents=True, exist_ok=True)
-            
-            for i, frame in enumerate(processed_frames):
-                frame_path = output_dir / f"frame_{i:04d}.jpg"
+                
+                # Save frame immediately
+                frame_path = output_dir / f"frame_{frame_count:04d}.jpg"
                 cv2.imwrite(
                     str(frame_path),
-                    cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    cv2.cvtColor(processed, cv2.COLOR_RGB2BGR),
+                    [cv2.IMWRITE_JPEG_QUALITY, 90]  # Reduced quality for memory efficiency
                 )
+                
                 frame_paths.append(str(frame_path))
+                frame_count += 1
+                
+                # Clear memory
+                del processed
+                if frame_count % 50 == 0:
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
             
-            # Include all relevant video info in result
+            if frame_count == 0:
+                return {
+                    'success': False,
+                    'error': "No frames processed from video",
+                    'video_id': video_info['video_id']
+                }
+            
             return {
                 'success': True,
                 'video_id': video_info['video_id'],
                 'gloss': video_info['gloss'],
                 'frame_paths': frame_paths,
-                'bbox': bbox or video_info.get('bbox', [0, 0, 1, 1]),  # Use provided bbox or default
+                'bbox': bbox or video_info.get('bbox', [0, 0, 1, 1]),
                 'fps': fps,
-                'num_frames': len(frames),
-                'split': video_info.get('split', 'train'),  # Preserve split information
-                'signer_id': video_info.get('signer_id'),  # Preserve signer information
-                'instance_id': video_info.get('instance_id')  # Preserve instance information
+                'num_frames': frame_count,
+                'split': video_info.get('split', 'train'),
+                'signer_id': video_info.get('signer_id'),
+                'instance_id': video_info.get('instance_id')
             }
             
         except Exception as e:
+            logger.error(f"Error processing video {video_info.get('video_id', 'unknown')}: {str(e)}")
             return {
                 'success': False,
                 'error': str(e),
                 'video_id': video_info.get('video_id', 'unknown')
             }
-    
+
     def process_batch(
         self,
         video_data: List[Dict],
         num_workers: int = 4
     ) -> List[Dict]:
         """
-        Process batch of videos.
+        Process batch of videos with memory monitoring.
         
         Args:
             video_data: List of video information dictionaries
-            num_workers: Number of worker processes
+            num_workers: Maximum number of worker processes
             
         Returns:
             List of processing results
@@ -267,21 +292,47 @@ class VideoPreprocessor:
             raise ValueError("Empty video data list")
         
         results = []
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = [
-                executor.submit(self.process_video, video)
-                for video in video_data
-            ]
+        total_videos = len(video_data)
+        processed = 0
+        
+        # Get baseline memory usage
+        memory_usage = psutil.Process().memory_info().rss / (1024 * 1024 * 1024)  # GB
+        logger.info(f"Initial memory usage: {memory_usage:.2f} GB")
+        
+        while processed < total_videos:
+            # Check available memory
+            available_mem = psutil.virtual_memory().available / (1024 * 1024 * 1024)  # GB
+            batch_size = max(1, min(int(available_mem / 2), 8))  # Use at most half available memory
+            current_batch = video_data[processed:processed + batch_size]
             
-            for future in tqdm(
-                futures,
-                total=len(video_data),
-                desc="Processing videos"
-            ):
-                results.append(future.result())
+            logger.info(f"Processing batch of {len(current_batch)} videos")
+            
+            with ThreadPoolExecutor(max_workers=min(num_workers, batch_size)) as executor:
+                futures = [
+                    executor.submit(self.process_video, video)
+                    for video in current_batch
+                ]
+                
+                for future in tqdm(futures, desc=f"Batch {processed//batch_size + 1}"):
+                    try:
+                        result = future.result()
+                        results.append(result)
+                    except Exception as e:
+                        logger.error(f"Error in batch processing: {str(e)}")
+            
+            processed += len(current_batch)
+            
+            # Clear memory
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            # Log memory usage
+            memory_usage = psutil.Process().memory_info().rss / (1024 * 1024 * 1024)
+            logger.info(f"Memory usage after batch: {memory_usage:.2f} GB")
         
         return results
-    
+
     def _save_results(
         self,
         results: List[Dict],
@@ -301,7 +352,7 @@ class VideoPreprocessor:
         
         with open(output_path, 'w') as f:
             json.dump(results, f, indent=2)
-    
+
     def __call__(
         self,
         video_data: List[Dict],
@@ -319,10 +370,8 @@ class VideoPreprocessor:
         Returns:
             List of processing results
         """
-        # Process videos
         results = self.process_batch(video_data, num_workers)
         
-        # Save results if requested
         if save_results:
             self._save_results(results)
         

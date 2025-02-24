@@ -1,1 +1,8 @@
-{}
+{
+  "before": 0,
+  "book": 1,
+  "chair": 2,
+  "computer": 3,
+  "drink": 4,
+  "go": 5
+}

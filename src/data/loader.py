@@ -6,8 +6,10 @@ import torchvision.transforms as transforms
 import numpy as np
 import json
 import cv2
+import gc
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
+from functools import lru_cache
 
 from ..config import DATA_CONFIG
 from ..utils import get_processed_dir
@@ -19,18 +21,23 @@ def load_video_data() -> List[Dict]:
     Returns:
         List of video data dictionaries
     """
-    results_path = get_processed_dir() / 'dataset.json'
+    # Check both possible file names for backward compatibility
+    possible_paths = [
+        get_processed_dir() / 'dataset.json',
+        get_processed_dir() / 'preprocessing_results.json'
+    ]
     
-    if not results_path.exists():
-        raise FileNotFoundError(
-            "Preprocessing results not found. Run preprocessing first."
-        )
+    for results_path in possible_paths:
+        if results_path.exists():
+            with open(results_path, 'r') as f:
+                return json.load(f)
     
-    with open(results_path, 'r') as f:
-        return json.load(f)
+    raise FileNotFoundError(
+        "Preprocessing results not found. Run preprocessing first."
+    )
 
 class VideoDataset(Dataset):
-    """Dataset handler for video processing."""
+    """Memory-efficient dataset handler for video processing."""
     
     def __init__(
         self,
@@ -38,7 +45,8 @@ class VideoDataset(Dataset):
         class_mapping: Dict[str, int],
         transform: Optional[transforms.Compose] = None,
         target_frames: int = DATA_CONFIG['num_frames'],
-        training: bool = False
+        training: bool = False,
+        max_cached_frames: int = 1000  # Limit frame cache size
     ):
         """
         Initialize dataset.
@@ -49,6 +57,7 @@ class VideoDataset(Dataset):
             transform: Optional transforms to apply
             target_frames: Number of frames to extract
             training: Whether in training mode
+            max_cached_frames: Maximum number of frames to cache
         """
         self.video_data = video_data
         self.class_mapping = class_mapping
@@ -56,6 +65,7 @@ class VideoDataset(Dataset):
         self.target_frames = target_frames
         self.training = training
         self.num_classes = len(class_mapping)
+        self.max_cached_frames = max_cached_frames
         
         # Default augmentation if no transform provided
         if self.transform is None and training:
@@ -82,12 +92,33 @@ class VideoDataset(Dataset):
         """Get dataset size."""
         return len(self.video_data)
     
+    @lru_cache(maxsize=1000)  # Cache frame loading
+    def _load_frame(self, frame_path: str) -> torch.Tensor:
+        """
+        Load and preprocess single frame with caching.
+        
+        Args:
+            frame_path: Path to frame file
+            
+        Returns:
+            Frame tensor
+        """
+        frame = cv2.imread(frame_path)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame = cv2.resize(frame, DATA_CONFIG['frame_size'])
+        
+        # Convert to tensor and normalize
+        frame = torch.FloatTensor(frame) / 255.0
+        frame = frame.permute(2, 0, 1)  # [H, W, C] -> [C, H, W]
+        
+        return frame
+    
     def load_video(
         self,
         frame_paths: List[str]
     ) -> torch.Tensor:
         """
-        Load and preprocess video frames.
+        Load and preprocess video frames efficiently.
         
         Args:
             frame_paths: List of frame file paths
@@ -95,7 +126,7 @@ class VideoDataset(Dataset):
         Returns:
             Frames tensor
         """
-        # Calculate frame indices
+        # Calculate frame indices for uniform sampling
         num_frames = len(frame_paths)
         if num_frames >= self.target_frames:
             indices = np.linspace(
@@ -107,20 +138,18 @@ class VideoDataset(Dataset):
             indices = list(range(num_frames))
             indices.extend([num_frames - 1] * (self.target_frames - num_frames))
         
-        # Load frames
+        # Load frames with caching
         frames = []
         for idx in indices:
-            frame = cv2.imread(frame_paths[idx])
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame = cv2.resize(frame, DATA_CONFIG['frame_size'])
+            frame = self._load_frame(frame_paths[idx])
             frames.append(frame)
+            
+            # Clear cache if too large
+            if len(self._load_frame.cache_info().cache) > self.max_cached_frames:
+                self._load_frame.cache_clear()
+                gc.collect()
         
-        # Convert to tensor
-        frames = torch.FloatTensor(np.array(frames))
-        frames = frames / 255.0  # Normalize to [0, 1]
-        frames = frames.permute(0, 3, 1, 2)  # [T, H, W, C] -> [T, C, H, W]
-        
-        return frames
+        return torch.stack(frames)
     
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -187,44 +216,51 @@ def create_dataloaders(
     val_data = [video_data[i] for i in indices[train_idx:val_idx]]
     test_data = [video_data[i] for i in indices[val_idx:]]
     
-    # Create datasets
+    # Create datasets with memory efficiency
+    max_cached = min(1000, batch_size * num_workers * 2)  # Adjust cache based on workers
+    
     train_dataset = VideoDataset(
         train_data,
         class_mapping,
-        training=True
+        training=True,
+        max_cached_frames=max_cached
     )
     val_dataset = VideoDataset(
         val_data,
         class_mapping,
-        training=False
+        training=False,
+        max_cached_frames=max_cached
     )
     test_dataset = VideoDataset(
         test_data,
         class_mapping,
-        training=False
+        training=False,
+        max_cached_frames=max_cached
     )
     
-    # Create dataloaders
+    # Create dataloaders with memory settings
+    dataloader_kwargs = {
+        'batch_size': batch_size,
+        'num_workers': num_workers,
+        'pin_memory': True,
+        'prefetch_factor': 2,  # Reduce prefetching to save memory
+        'persistent_workers': True  # Keep workers alive between epochs
+    }
+    
     train_loader = DataLoader(
         train_dataset,
-        batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers,
-        pin_memory=True
+        **dataloader_kwargs
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
-        pin_memory=True
+        **dataloader_kwargs
     )
     test_loader = DataLoader(
         test_dataset,
-        batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
-        pin_memory=True
+        **dataloader_kwargs
     )
     
     return train_loader, val_loader, test_loader

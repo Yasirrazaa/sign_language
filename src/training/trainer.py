@@ -1,29 +1,21 @@
-"""Training implementation for sign language detection models."""
+"""Training implementation for sign language detection."""
 
 import torch
 import torch.nn as nn
+from torch.cuda.amp import autocast, GradScaler
 from torch.optim import Optimizer
-<<<<<<< HEAD
-# Remove CosineAnnealingWarmRestarts import
-=======
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
->>>>>>> 3ece852 (Add initial project structure and essential files for sign language detection)
 from torch.utils.data import DataLoader
 import wandb
 import logging
-import numpy as np
+import gc
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Callable
 from tqdm import tqdm
 from dataclasses import dataclass
 
-from ..models import SignLanguageCNNLSTM, VideoTransformer
 from ..utils import get_checkpoint_dir
-<<<<<<< HEAD
-from .callbacks import ModelCheckpoint, EarlyStopping, WarmupScheduler
-=======
 from .callbacks import ModelCheckpoint, EarlyStopping
->>>>>>> 3ece852 (Add initial project structure and essential files for sign language detection)
 from .metrics import calculate_metrics
 from ..config import TRAIN_CONFIG
 
@@ -40,13 +32,17 @@ class TrainerConfig:
     checkpoint_dir: Optional[Path] = None
     device: Optional[torch.device] = None
     fold: Optional[int] = None  # Current fold number for cross-validation
+    mixed_precision: bool = True  # Enable mixed precision training
+    gradient_accumulation_steps: int = 1  # Number of steps to accumulate gradients
+    max_grad_norm: float = 1.0  # Maximum gradient norm
+    enable_checkpointing: bool = True  # Enable gradient checkpointing
 
-class Trainer:
-    """Model trainer implementation."""
+class MemoryEfficientTrainer:
+    """GPU memory-efficient model trainer implementation."""
     
     def __init__(
         self,
-        model: Union[SignLanguageCNNLSTM, VideoTransformer],
+        model: nn.Module,
         config: TrainerConfig
     ):
         """Initialize trainer."""
@@ -61,29 +57,15 @@ class Trainer:
         )
         self.model = self.model.to(self.device)
         
-        # Initialize optimizer
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(),
-            lr=config.learning_rate,
-            weight_decay=config.weight_decay
-        )
+        # Enable gradient checkpointing if supported
+        if config.enable_checkpointing and hasattr(self.model, 'gradient_checkpointing_enable'):
+            self.model.gradient_checkpointing_enable()
         
-<<<<<<< HEAD
-        # Initialize scheduler with warmup
-        self.scheduler = WarmupScheduler(
-            optimizer=self.optimizer,
-            warmup_epochs=config.warmup_epochs,
-            initial_lr=config.learning_rate,
-            min_lr=TRAIN_CONFIG['min_learning_rate']
-=======
-        # Initialize scheduler with cosine annealing and warm restarts
-        self.scheduler = CosineAnnealingWarmRestarts(
-            self.optimizer,
-            T_0=10,  # Initial restart interval
-            T_mult=2,  # Multiply interval by 2 after each restart
-            eta_min=TRAIN_CONFIG['min_learning_rate']
->>>>>>> 3ece852 (Add initial project structure and essential files for sign language detection)
-        )
+        # Initialize optimizer with weight decay for normalization layers
+        self._setup_optimizer()
+        
+        # Initialize mixed precision training
+        self.scaler = GradScaler() if config.mixed_precision and torch.cuda.is_available() else None
         
         # Initialize loss function with label smoothing
         self.criterion = nn.CrossEntropyLoss(
@@ -105,16 +87,7 @@ class Trainer:
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize history tracking
-        self.history = {
-            'train_loss': [], 'val_loss': [],
-            'train_accuracy': [], 'val_accuracy': [],
-            'train_top3_acc': [], 'val_top3_acc': [],
-            'train_top5_acc': [], 'val_top5_acc': [],
-            'train_precision': [], 'val_precision': [],
-            'train_recall': [], 'val_recall': [],
-            'train_f1': [], 'val_f1': [],
-            'learning_rate': []
-        }
+        self.history = self._init_history()
         
         # Initialize callbacks
         self.callbacks = self._setup_callbacks()
@@ -123,16 +96,52 @@ class Trainer:
         if config.use_wandb:
             self._setup_wandb()
     
-    def _get_warmup_lr(self, epoch: int, batch_idx: int, num_batches: int) -> float:
-        """Calculate learning rate during warmup period."""
-        if epoch >= self.config.warmup_epochs:
-            return None
-            
-        total_steps = self.config.warmup_epochs * num_batches
-        current_step = epoch * num_batches + batch_idx
+    def _setup_optimizer(self):
+        """Setup optimizer with weight decay for normalization layers."""
+        # Separate parameters that should and shouldn't use weight decay
+        no_decay = ['bias', 'LayerNorm.weight']
+        optimizer_grouped_parameters = [
+            {
+                'params': [p for n, p in self.model.named_parameters()
+                          if not any(nd in n for nd in no_decay)],
+                'weight_decay': self.config.weight_decay
+            },
+            {
+                'params': [p for n, p in self.model.named_parameters()
+                          if any(nd in n for nd in no_decay)],
+                'weight_decay': 0.0
+            }
+        ]
         
-        return self.config.learning_rate * (current_step / total_steps)
-    
+        self.optimizer = torch.optim.AdamW(
+            optimizer_grouped_parameters,
+            lr=self.config.learning_rate
+        )
+        
+        # Linear warmup and cosine decay
+        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            self.optimizer,
+            max_lr=self.config.learning_rate,
+            epochs=self.config.num_epochs,
+            steps_per_epoch=1,  # Will be updated in train()
+            pct_start=self.config.warmup_epochs / self.config.num_epochs,
+            anneal_strategy='cos'
+        )
+
+    def _init_history(self) -> Dict[str, List]:
+        """Initialize training history."""
+        return {
+            'train_loss': [], 'val_loss': [],
+            'train_accuracy': [], 'val_accuracy': [],
+            'train_top3_acc': [], 'val_top3_acc': [],
+            'train_top5_acc': [], 'val_top5_acc': [],
+            'train_precision': [], 'val_precision': [],
+            'train_recall': [], 'val_recall': [],
+            'train_f1': [], 'val_f1': [],
+            'learning_rate': [],
+            'gpu_memory': []
+        }
+
     def _setup_callbacks(self) -> List[Callable]:
         """Setup training callbacks."""
         callbacks = []
@@ -143,7 +152,7 @@ class Trainer:
                 dirpath=self.checkpoint_dir,
                 monitor='val_loss',
                 mode='min',
-                save_top_k=3
+                save_top_k=2  # Reduced from 3 to save memory
             )
         )
         
@@ -157,7 +166,7 @@ class Trainer:
         )
         
         return callbacks
-    
+
     def _setup_wandb(self):
         """Initialize Weights & Biases logging."""
         wandb.init(
@@ -169,58 +178,76 @@ class Trainer:
         )
         wandb.watch(self.model)
     
+    def _clear_memory(self):
+        """Clear GPU memory cache."""
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+    
     def train_step(
         self,
         batch: Tuple[torch.Tensor, torch.Tensor],
-        epoch: int,
-        batch_idx: int,
-        num_batches: int
+        step: int
     ) -> Dict[str, float]:
-        """Single training step."""
+        """Single training step with memory optimizations."""
         frames, labels = batch
         frames = frames.to(self.device)
-        # Convert one-hot labels to class indices
         labels = torch.argmax(labels, dim=1).to(self.device)
         
-        # Warmup learning rate if in warmup period
-        warmup_lr = self._get_warmup_lr(epoch, batch_idx, num_batches)
-        if warmup_lr is not None:
-            for param_group in self.optimizer.param_groups:
-                param_group['lr'] = warmup_lr
-        
-        # Forward pass
-        predictions = self.model(frames)
-        
-        # Calculate loss
-        loss = self.criterion(predictions, labels)
-        
-        # Backward pass
-        self.optimizer.zero_grad()
-        loss.backward()
-        
-        # Gradient clipping
-        if self.config.clip_grad_norm > 0:
-            torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(),
-                self.config.clip_grad_norm
-            )
-        
-        self.optimizer.step()
-        
-        # Step scheduler if not in warmup
-        if warmup_lr is None:
-            self.scheduler.step(epoch + batch_idx / num_batches)
+        # Mixed precision training
+        if self.scaler is not None:
+            with autocast():
+                predictions = self.model(frames)
+                loss = self.criterion(predictions, labels)
+                loss = loss / self.config.gradient_accumulation_steps
+            
+            # Scale loss and backward pass
+            self.scaler.scale(loss).backward()
+            
+            if (step + 1) % self.config.gradient_accumulation_steps == 0:
+                # Unscale gradients for clipping
+                self.scaler.unscale_(self.optimizer)
+                
+                # Clip gradients
+                if self.config.clip_grad_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(),
+                        self.config.max_grad_norm
+                    )
+                
+                # Update weights
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                self.optimizer.zero_grad()
+        else:
+            predictions = self.model(frames)
+            loss = self.criterion(predictions, labels)
+            loss = loss / self.config.gradient_accumulation_steps
+            
+            loss.backward()
+            
+            if (step + 1) % self.config.gradient_accumulation_steps == 0:
+                if self.config.clip_grad_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(),
+                        self.config.max_grad_norm
+                    )
+                self.optimizer.step()
+                self.optimizer.zero_grad()
         
         # Calculate metrics
         metrics = calculate_metrics(predictions.detach(), labels.detach())
-        metrics['loss'] = loss.item()
+        metrics['loss'] = loss.item() * self.config.gradient_accumulation_steps
         metrics['lr'] = self.optimizer.param_groups[0]['lr']
         
-        # Prefix metrics with 'train_'
-        train_metrics = {f'train_{k}': v for k, v in metrics.items()}
+        if torch.cuda.is_available():
+            metrics['gpu_memory'] = torch.cuda.memory_reserved() / 1024**3  # GB
         
-        return train_metrics
-    
+        # Clear unnecessary tensors
+        del frames, labels, predictions
+        
+        return {f'train_{k}': v for k, v in metrics.items()}
+
     @torch.no_grad()
     def validate_step(
         self,
@@ -229,77 +256,45 @@ class Trainer:
         """Single validation step."""
         frames, labels = batch
         frames = frames.to(self.device)
-        # Convert one-hot labels to class indices
         labels = torch.argmax(labels, dim=1).to(self.device)
         
-        # Forward pass
-        predictions = self.model(frames)
-        
-        # Calculate loss
-        loss = self.criterion(predictions, labels)
+        if self.scaler is not None:
+            with autocast():
+                predictions = self.model(frames)
+                loss = self.criterion(predictions, labels)
+        else:
+            predictions = self.model(frames)
+            loss = self.criterion(predictions, labels)
         
         # Calculate metrics
         metrics = calculate_metrics(predictions, labels)
         metrics['loss'] = loss.item()
         
-        # Prefix metrics with 'val_'
-        val_metrics = {f'val_{k}': v for k, v in metrics.items()}
+        # Clear memory
+        del frames, labels, predictions
         
-        return val_metrics
-    
+        return {f'val_{k}': v for k, v in metrics.items()}
+
     def train_epoch(
         self,
         train_loader: DataLoader,
         epoch: int
     ) -> Dict[str, float]:
-        """Train for one epoch."""
+        """Train for one epoch with memory optimizations."""
         self.model.train()
         epoch_metrics = []
-        num_batches = len(train_loader)
         
-        for batch_idx, batch in enumerate(tqdm(train_loader, desc='Training')):
-            metrics = self.train_step(batch, epoch, batch_idx, num_batches)
+        for step, batch in enumerate(tqdm(train_loader, desc='Training')):
+            metrics = self.train_step(batch, step)
             epoch_metrics.append(metrics)
-        
-        # Average metrics
-        avg_metrics = {}
-        for key in epoch_metrics[0].keys():
-            avg_metrics[key] = sum(m[key] for m in epoch_metrics) / len(epoch_metrics)
-        
-        return avg_metrics
-    
-    @torch.no_grad()
-    def validate_epoch(
-        self,
-        val_loader: DataLoader
-    ) -> Dict[str, float]:
-        """Validate for one epoch."""
-        self.model.eval()
-        epoch_metrics = []
-        
-        if len(val_loader.dataset) == 0:
-            self.logger.warning("No validation data available!")
-            return {
-                'val_loss': 0.0,
-                'val_accuracy': 0.0,
-                'val_precision': 0.0,
-                'val_recall': 0.0,
-                'val_f1': 0.0
-            }
-        
-        for batch in tqdm(val_loader, desc='Validating'):
-            metrics = self.validate_step(batch)
-            epoch_metrics.append(metrics)
-        
-        if not epoch_metrics:
-            self.logger.warning("No validation batches completed!")
-            return {
-                'val_loss': float('inf'),
-                'val_accuracy': 0.0,
-                'val_precision': 0.0,
-                'val_recall': 0.0,
-                'val_f1': 0.0
-            }
+            
+            # Step scheduler
+            if (step + 1) % self.config.gradient_accumulation_steps == 0:
+                self.scheduler.step()
+            
+            # Clear memory periodically
+            if step % 10 == 0:
+                self._clear_memory()
         
         # Average metrics
         avg_metrics = {}
@@ -313,118 +308,104 @@ class Trainer:
         train_loader: DataLoader,
         val_loader: DataLoader
     ) -> Dict[str, List[float]]:
-        """Train the model."""
+        """Train the model with memory optimizations."""
         self.logger.info("Starting training...")
         
-        for epoch in range(self.config.num_epochs):
-            self.logger.info(f"\nEpoch {epoch + 1}/{self.config.num_epochs}")
-            
-            # Training
-            train_metrics = self.train_epoch(train_loader, epoch)
-            for key, value in train_metrics.items():
-                if key in self.history:
-                    self.history[key].append(value)
-            
-            # Validation
-            val_metrics = self.validate_epoch(val_loader)
-            for key, value in val_metrics.items():
-                if key in self.history:
-                    self.history[key].append(value)
-            
-            # Track learning rate
-            self.history['learning_rate'].append(
-                self.optimizer.param_groups[0]['lr']
-            )
-            
-            # Log metrics
-            self._log_metrics(epoch, train_metrics, val_metrics)
-            
-            # Run callbacks
-            stop_training = False
-            for callback in self.callbacks:
-                if callback(self, val_metrics):
-                    stop_training = True
+        # Update scheduler steps
+        self.scheduler.total_steps = len(train_loader) * self.config.num_epochs
+        
+        try:
+            for epoch in range(self.config.num_epochs):
+                self.logger.info(f"\nEpoch {epoch + 1}/{self.config.num_epochs}")
+                
+                # Training
+                train_metrics = self.train_epoch(train_loader, epoch)
+                for key, value in train_metrics.items():
+                    if key in self.history:
+                        self.history[key].append(value)
+                
+                # Validation
+                val_metrics = self.validate_epoch(val_loader)
+                for key, value in val_metrics.items():
+                    if key in self.history:
+                        self.history[key].append(value)
+                
+                # Track learning rate
+                self.history['learning_rate'].append(
+                    self.optimizer.param_groups[0]['lr']
+                )
+                
+                # Log metrics
+                self._log_metrics(epoch, train_metrics, val_metrics)
+                
+                # Clear memory before callbacks
+                self._clear_memory()
+                
+                # Run callbacks
+                stop_training = False
+                for callback in self.callbacks:
+                    if callback(self, val_metrics):
+                        stop_training = True
+                        break
+                
+                if stop_training:
+                    self.logger.info("Early stopping triggered")
                     break
-            
-            if stop_training:
-                self.logger.info("Early stopping triggered")
-                break
+                
+        except Exception as e:
+            self.logger.error(f"Training interrupted: {str(e)}")
+            raise
+        finally:
+            # Clean up
+            self._clear_memory()
+            if self.config.use_wandb:
+                wandb.finish()
         
         self.logger.info("Training completed")
         return self.history
-    
-    def _format_time(self, seconds: float) -> str:
-        """Format time in hours:minutes:seconds."""
-        m, s = divmod(int(seconds), 60)
-        h, m = divmod(m, 60)
-        return f'{h:d}:{m:02d}:{s:02d}'
 
-    def _format_metrics(
+    @torch.no_grad()
+    def validate_epoch(
         self,
-        epoch: int,
-        train_metrics: Dict[str, float],
-        val_metrics: Dict[str, float],
-        time_elapsed: float,
-        time_remaining: float
-    ) -> str:
-        """Format metrics for display."""
-        fold_str = f"Fold {self.config.fold}/{TRAIN_CONFIG['num_folds']} | " if self.config.fold else ""
+        val_loader: DataLoader
+    ) -> Dict[str, float]:
+        """Validate for one epoch."""
+        self.model.eval()
+        epoch_metrics = []
         
-        metrics_str = (
-            f"\n{'='*100}\n"
-            f"{fold_str}Epoch [{epoch+1}/{self.config.num_epochs}] | "
-            f"Time {self._format_time(time_elapsed)} (ETA: {self._format_time(time_remaining)})\n"
-            f"{'='*100}\n"
-            f"Training   | Loss: {train_metrics['train_loss']:.4f} | "
-            f"Acc: {train_metrics['train_accuracy']:.2%} | "
-            f"Top-3: {train_metrics['train_top3_acc']:.2%} | "
-            f"F1: {train_metrics['train_f1']:.4f}\n"
-            f"Validation | Loss: {val_metrics['val_loss']:.4f} | "
-            f"Acc: {val_metrics['val_accuracy']:.2%} | "
-            f"Top-3: {val_metrics['val_top3_acc']:.2%} | "
-            f"F1: {val_metrics['val_f1']:.4f}\n"
-            f"{'='*100}\n"
-            f"Learning Rate: {self.optimizer.param_groups[0]['lr']:.2e}\n"
-            f"{'='*100}"
-        )
+        if len(val_loader.dataset) == 0:
+            self.logger.warning("No validation data available!")
+            return {
+                'val_loss': float('inf'),
+                'val_accuracy': 0.0,
+                'val_precision': 0.0,
+                'val_recall': 0.0,
+                'val_f1': 0.0
+            }
         
-        return metrics_str
+        for batch in tqdm(val_loader, desc='Validating'):
+            metrics = self.validate_step(batch)
+            epoch_metrics.append(metrics)
+            
+            # Clear memory periodically
+            if len(epoch_metrics) % 10 == 0:
+                self._clear_memory()
+        
+        # Average metrics
+        avg_metrics = {}
+        for key in epoch_metrics[0].keys():
+            avg_metrics[key] = sum(m[key] for m in epoch_metrics) / len(epoch_metrics)
+        
+        return avg_metrics
 
-    def _log_metrics(
-        self,
-        epoch: int,
-        train_metrics: Dict[str, float],
-        val_metrics: Dict[str, float]
-    ):
-        """Log metrics for current epoch."""
-        # Calculate timing information
-        time_elapsed = time.time() - self.start_time
-        time_per_epoch = time_elapsed / (epoch + 1)
-        time_remaining = time_per_epoch * (self.config.num_epochs - epoch - 1)
-        
-        # Format and display metrics
-        metrics_str = self._format_metrics(
-            epoch, train_metrics, val_metrics,
-            time_elapsed, time_remaining
-        )
-        self.logger.info(metrics_str)
-        
-        # W&B logging
-        if self.config.use_wandb:
-            wandb.log({
-                'epoch': epoch + 1,
-                **train_metrics,
-                **val_metrics,
-                'learning_rate': self.optimizer.param_groups[0]['lr']
-            })
-    
     def save_checkpoint(self, path: Union[str, Path]):
-        """Save model checkpoint."""
+        """Save model checkpoint efficiently."""
         checkpoint = {
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict(),
-            'config': self.config.__dict__
+            'config': self.config.__dict__,
+            'scaler': self.scaler.state_dict() if self.scaler else None
         }
         torch.save(checkpoint, path)
     
@@ -434,3 +415,33 @@ class Trainer:
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        if self.scaler and checkpoint['scaler']:
+            self.scaler.load_state_dict(checkpoint['scaler'])
+
+    def _log_metrics(self, epoch, train_metrics, val_metrics):
+        """Log training metrics."""
+        # Calculate timing information
+        time_elapsed = time.time() - self.start_time
+        time_per_epoch = time_elapsed / (epoch + 1)
+        time_remaining = time_per_epoch * (self.config.num_epochs - epoch - 1)
+        
+        # Log to console
+        metrics_str = (
+            f"\nEpoch {epoch + 1}/{self.config.num_epochs} | "
+            f"Time {time_elapsed:.0f}s (ETA: {time_remaining:.0f}s)\n"
+            f"Train Loss: {train_metrics['train_loss']:.4f} | "
+            f"Val Loss: {val_metrics['val_loss']:.4f}\n"
+            f"Train Acc: {train_metrics['train_accuracy']:.4f} | "
+            f"Val Acc: {val_metrics['val_accuracy']:.4f}\n"
+            f"GPU Memory: {train_metrics.get('train_gpu_memory', 0):.2f} GB"
+        )
+        self.logger.info(metrics_str)
+        
+        # Log to wandb
+        if self.config.use_wandb:
+            wandb.log({
+                'epoch': epoch + 1,
+                **train_metrics,
+                **val_metrics,
+                'learning_rate': self.optimizer.param_groups[0]['lr']
+            })
